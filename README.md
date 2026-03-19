@@ -1,7 +1,5 @@
 # WireGuard Easy – Home Assistant Integration
 
-[![Add Integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start?domain=wg-easy)
-
 Custom integration for Home Assistant that connects to the WireGuard Easy (wg-easy) API and exposes peers as devices with sensors and binary sensors.
 
 ## Source project
@@ -9,23 +7,30 @@ https://github.com/wg-easy/wg-easy
 
 ---
 
-## Installation via HACS
+## Installation
 
-[![Open your Home Assistant instance and show the add repository dialog](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?repository=https://github.com/metaathron/ha-wgeasy&category=integration)
+### Installation via HACS
 
-### Manual steps (if button does not work)
+1. Add this repository as a custom repository to HACS:
 
-1. Open HACS
-2. Go to Integrations
-3. Click menu (⋮) → Custom repositories
-4. Add:
-   https://github.com/metaathron/ha-wgeasy
-   Category: Integration
+[![Add Repository](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=metaathron&repository=ha-wgeasy&category=Integration)
 
-5. Install integration
-6. Restart Home Assistant
+2. Use HACS to install the integration.
+3. Restart Home Assistant.
+4. Set up the integration using the UI:
 
----
+[![Add Integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=wg-easy)
+
+
+### Manual Installation
+
+1. Download the integration files from the GitHub repository.
+2. Place the integration folder in the custom_components directory of Home Assistant.
+3. Restart Home Assistant.
+4. Set up the integration using the UI:
+
+[![Add Integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=wg-easy)
+
 
 ## Setup
 
