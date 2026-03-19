@@ -1,0 +1,6 @@
+DOMAIN = "wg_easy"
+DEFAULT_POLL_INTERVAL = 30
+DEFAULT_ONLINE_TIMEOUT_MINUTES = 5
+PLATFORMS = ["sensor", "binary_sensor"]
+SERVER_DEVICE_ID = "wireguard_server"
+ENTITY_ID_PREFIX = "wg"
