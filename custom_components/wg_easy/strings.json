@@ -1,0 +1,37 @@
+{
+  "title": "WG Easy",
+  "config": {
+    "step": {
+      "user": {
+        "title": "WG Easy",
+        "description": "Set up the WG Easy integration.",
+        "data": {
+          "url": "API URL",
+          "token": "API token"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure WG Easy",
+        "data": {
+          "url": "API URL",
+          "token": "API token"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This integration is already configured.",
+      "wrong_account": "The provided URL does not match this configured instance."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "WG Easy options",
+        "data": {
+          "poll_interval": "Polling interval",
+          "online_timeout_minutes": "Online timeout (minutes)"
+        }
+      }
+    }
+  }
+}
