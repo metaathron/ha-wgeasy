@@ -19,7 +19,7 @@ https://github.com/wg-easy/wg-easy
 3. Restart Home Assistant.
 4. Set up the integration using the UI:
 
-[![Add Integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=wg-easy)
+[![Add Integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=wg_easy)
 
 
 ### Manual Installation
@@ -29,7 +29,7 @@ https://github.com/wg-easy/wg-easy
 3. Restart Home Assistant.
 4. Set up the integration using the UI:
 
-[![Add Integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=wg-easy)
+[![Add Integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=wg_easy)
 
 
 ## Setup
