@@ -10,6 +10,10 @@
           "api_version": "wg-easy API version (auto, v14, v15)",
           "token": "API token (v15)",
           "password": "Password (v14)"
+        },
+        "data_description": {
+          "token": "v15 only. The Bearer Password set under Admin Panel \u2192 General \u2192 Metrics in the wg-easy web UI (used to protect the metrics endpoint). Leave empty if your server is v14.",
+          "password": "v14 only. The same password you use to log in to the wg-easy web UI (set via the PASSWORD/PASSWORD_HASH environment variable on the wg-easy container). Leave empty if your server is v15."
         }
       },
       "reconfigure": {
@@ -19,6 +23,10 @@
           "api_version": "wg-easy API version (auto, v14, v15)",
           "token": "API token (v15)",
           "password": "Password (v14)"
+        },
+        "data_description": {
+          "token": "v15 only. The Bearer Password set under Admin Panel \u2192 General \u2192 Metrics in the wg-easy web UI (used to protect the metrics endpoint). Leave empty if your server is v14.",
+          "password": "v14 only. The same password you use to log in to the wg-easy web UI (set via the PASSWORD/PASSWORD_HASH environment variable on the wg-easy container). Leave empty if your server is v15."
         }
       }
     },
