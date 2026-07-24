@@ -4,19 +4,26 @@
     "step": {
       "user": {
         "title": "WG Easy",
-        "description": "Set up the WG Easy integration.",
+        "description": "Set up the WG Easy integration. Choose \"auto\" to let the integration detect whether your wg-easy server speaks the v14 (password) or v15 (API token) API, or pick one explicitly and provide only the matching credential.",
         "data": {
           "url": "API URL",
-          "token": "API token"
+          "api_version": "wg-easy API version (auto, v14, v15)",
+          "token": "API token (v15)",
+          "password": "Password (v14)"
         }
       },
       "reconfigure": {
         "title": "Reconfigure WG Easy",
         "data": {
           "url": "API URL",
-          "token": "API token"
+          "api_version": "wg-easy API version (auto, v14, v15)",
+          "token": "API token (v15)",
+          "password": "Password (v14)"
         }
       }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to wg-easy with the given URL/credentials for the selected API version."
     },
     "abort": {
       "already_configured": "This integration is already configured.",

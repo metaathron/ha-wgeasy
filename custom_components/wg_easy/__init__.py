@@ -3,14 +3,17 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_TOKEN, CONF_URL
+from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_URL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
+    API_VERSION_V15,
+    CONF_API_VERSION,
     CONF_ONLINE_TIMEOUT_MINUTES,
     CONF_ONLINE_TIMEOUT_SECONDS,
+    CONF_RESOLVED_API_VERSION,
     DEFAULT_ONLINE_TIMEOUT_MINUTES,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
@@ -55,14 +58,39 @@ def _migrate_online_timeout_option(hass: HomeAssistant, entry: WGEasyConfigEntry
     )
 
 
+def _migrate_api_version_data(hass: HomeAssistant, entry: WGEasyConfigEntry) -> None:
+    """One-time migration for entries created before v14 support existed.
+
+    Those entries always spoke the v15 (bearer-token) API and have no
+    api_version/resolved_api_version keys yet. Fill them in explicitly so
+    behaviour is unchanged and no reconfiguration is required.
+    """
+    if CONF_API_VERSION in entry.data:
+        return
+
+    new_data = {
+        **entry.data,
+        CONF_API_VERSION: API_VERSION_V15,
+        CONF_RESOLVED_API_VERSION: API_VERSION_V15,
+    }
+    hass.config_entries.async_update_entry(entry, data=new_data)
+    _LOGGER.info(
+        "WG Easy (%s): migrated existing entry to explicit v15 API mode",
+        entry.title,
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: WGEasyConfigEntry) -> bool:
     _migrate_online_timeout_option(hass, entry)
+    _migrate_api_version_data(hass, entry)
 
     coordinator = WGEasyCoordinator(
         hass,
         config_entry_id=entry.entry_id,
         url=entry.data[CONF_URL],
-        token=entry.data[CONF_TOKEN],
+        api_version=entry.data[CONF_RESOLVED_API_VERSION],
+        token=entry.data.get(CONF_TOKEN),
+        password=entry.data.get(CONF_PASSWORD),
         poll_interval=entry.options.get("poll_interval", DEFAULT_POLL_INTERVAL),
     )
 

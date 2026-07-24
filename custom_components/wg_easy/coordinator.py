@@ -5,14 +5,13 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
-from aiohttp import ClientError
-
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .const import DEFAULT_POLL_INTERVAL, DOMAIN
+from .api import WGEasyApiError, WGEasyAuthError, WGEasyV14Client, WGEasyV15Client
+from .const import API_VERSION_V14, DEFAULT_POLL_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,7 +23,9 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         config_entry_id: str,
         url: str,
-        token: str,
+        api_version: str,
+        token: str | None = None,
+        password: str | None = None,
         poll_interval: int = DEFAULT_POLL_INTERVAL,
     ) -> None:
         super().__init__(
@@ -34,9 +35,16 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=timedelta(seconds=max(5, int(poll_interval))),
         )
         self.url = url
-        self.token = token
+        self.api_version = api_version
         self.config_entry_id = config_entry_id
         self.session = async_get_clientsession(hass)
+
+        self._client: WGEasyV14Client | WGEasyV15Client
+        if api_version == API_VERSION_V14:
+            self._client = WGEasyV14Client(self.session, url, password)
+        else:
+            self._client = WGEasyV15Client(self.session, url, token)
+
         self._known_client_keys: set[str] = set()
         self.peer_map: dict[str, dict[str, Any]] = {}
         self._previous_counters: dict[str, tuple[datetime, int, int]] = {}
@@ -44,22 +52,12 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_normalized_data: dict[str, Any] | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "Accept": "application/json",
-        }
-
         try:
-            async with self.session.get(self.url, headers=headers) as response:
-                if response.status == 401:
-                    raise UpdateFailed("Unauthorized – check token")
-                if response.status >= 400:
-                    body = await response.text()
-                    raise UpdateFailed(f"HTTP {response.status}: {body[:200]}")
-
-                raw_body = await response.read()
-        except ClientError as err:
-            raise UpdateFailed(f"Request failed: {err}") from err
+            raw_body = await self._client.async_fetch_raw()
+        except WGEasyAuthError as err:
+            raise UpdateFailed(f"Authentication failed: {err}") from err
+        except WGEasyApiError as err:
+            raise UpdateFailed(str(err)) from err
 
         if raw_body == self._last_raw_response and self._last_normalized_data is not None:
             # The server returned byte-for-byte the same payload as last poll.
@@ -86,15 +84,32 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_normalized_data = data
         return data
 
-    def _normalize_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        clients = payload.get("clients") or []
+    def _normalize_payload(self, payload: Any) -> dict[str, Any]:
+        """Normalize a v14 or v15 payload into a common shape.
+
+        v15 returns a dict with a "clients" list, each keyed by "publicKey".
+        v14 returns either a dict or a bare list, each keyed by "id". Both
+        are normalized here to use "publicKey" as the canonical identifier,
+        so sensor.py / binary_sensor.py / entity_manager.py don't need to
+        know which API version produced the data.
+        """
+        if isinstance(payload, list):
+            clients = payload
+            base_payload: dict[str, Any] = {}
+        elif isinstance(payload, dict):
+            clients = payload.get("clients") or []
+            base_payload = payload
+        else:
+            clients = []
+            base_payload = {}
+
         now = dt_util.utcnow()
 
         normalized_clients: list[dict[str, Any]] = []
         next_previous_counters: dict[str, tuple[datetime, int, int]] = {}
 
         for client in clients:
-            public_key = client.get("publicKey")
+            public_key = client.get("publicKey") or client.get("id")
             if not public_key:
                 continue
 
@@ -115,16 +130,24 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             next_previous_counters[public_key] = (now, transfer_rx, transfer_tx)
 
+            # v14 doesn't always expose a ready-made ipv4Address field; fall
+            # back to the first entry in allowedIps if present.
+            allowed_ips = client.get("allowedIps") or []
+            inferred_ipv4 = (
+                allowed_ips[0] if isinstance(allowed_ips, list) and allowed_ips else None
+            )
+
             normalized_clients.append(
                 {
                     **client,
+                    "publicKey": public_key,
                     "name": client.get("name") or public_key[:8],
                     "transferRx": transfer_rx,
                     "transferTx": transfer_tx,
                     "transferRxRate": round(transfer_rx_rate, 2),
                     "transferTxRate": round(transfer_tx_rate, 2),
                     "endpoint": client.get("endpoint") or None,
-                    "ipv4Address": client.get("ipv4Address") or None,
+                    "ipv4Address": client.get("ipv4Address") or inferred_ipv4,
                     "ipv6Address": client.get("ipv6Address") or None,
                     "enabled": bool(client.get("enabled", False)),
                     "latestHandshakeAt": client.get("latestHandshakeAt") or None,
@@ -134,16 +157,16 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._previous_counters = next_previous_counters
 
         return {
-            **payload,
+            **base_payload,
             "clients": normalized_clients,
-            "wireguard_configured_peers": payload.get(
+            "wireguard_configured_peers": base_payload.get(
                 "wireguard_configured_peers", len(normalized_clients)
             ),
-            "wireguard_enabled_peers": payload.get(
+            "wireguard_enabled_peers": base_payload.get(
                 "wireguard_enabled_peers",
                 sum(1 for client in normalized_clients if client["enabled"]),
             ),
-            "wireguard_connected_peers": payload.get(
+            "wireguard_connected_peers": base_payload.get(
                 "wireguard_connected_peers",
                 sum(
                     1
