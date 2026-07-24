@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -39,6 +40,8 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._known_client_keys: set[str] = set()
         self.peer_map: dict[str, dict[str, Any]] = {}
         self._previous_counters: dict[str, tuple[datetime, int, int]] = {}
+        self._last_raw_response: bytes | None = None
+        self._last_normalized_data: dict[str, Any] | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         headers = {
@@ -54,15 +57,33 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     body = await response.text()
                     raise UpdateFailed(f"HTTP {response.status}: {body[:200]}")
 
-                payload = await response.json()
+                raw_body = await response.read()
         except ClientError as err:
             raise UpdateFailed(f"Request failed: {err}") from err
+
+        if raw_body == self._last_raw_response and self._last_normalized_data is not None:
+            # The server returned byte-for-byte the same payload as last poll.
+            # Skip the JSON decode + per-peer normalization pass entirely, but
+            # keep the rate-limiting bookkeeping fresh so that a later real
+            # change doesn't produce an artificially inflated transfer rate.
+            now = dt_util.utcnow()
+            self._previous_counters = {
+                client_key: (now, rx, tx)
+                for client_key, (_, rx, tx) in self._previous_counters.items()
+            }
+            return self._last_normalized_data
+
+        try:
+            payload = json.loads(raw_body)
         except ValueError as err:
             raise UpdateFailed(f"Invalid JSON response: {err}") from err
 
         data = self._normalize_payload(payload)
         self.peer_map = {client["publicKey"]: client for client in data["clients"]}
         self._remove_stale_devices(set(self.peer_map))
+
+        self._last_raw_response = raw_body
+        self._last_normalized_data = data
         return data
 
     def _normalize_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
