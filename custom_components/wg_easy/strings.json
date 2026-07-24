@@ -29,7 +29,7 @@
         "title": "WG Easy options",
         "data": {
           "poll_interval": "Polling interval",
-          "online_timeout_minutes": "Online timeout (minutes)"
+          "online_timeout_seconds": "Online timeout (seconds)"
         }
       }
     }
