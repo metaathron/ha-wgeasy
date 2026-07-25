@@ -106,55 +106,34 @@ class WGEasyV14Client:
             raise WGEasyApiError(f"Request failed: {err}") from err
 
 
-async def async_detect_api_version(
-    session: ClientSession,
-    url: str,
-    *,
-    token: str | None,
-    password: str | None,
-    requested_version: str,
-) -> tuple[str, "WGEasyV14Client | WGEasyV15Client"]:
-    """Resolve which wg-easy API version to use and return a ready client for it.
+async def async_probe_wg_easy_version(session: ClientSession, url: str) -> str:
+    """Unauthenticated probe to tell wg-easy v14 apart from v15, before any credentials.
 
-    - requested_version == "v14" or "v15": only that method is tried (manual override).
-    - requested_version == "auto": tries whichever credentials were supplied,
-      password/v14 first, then token/v15, and keeps the first one that works.
+    wg-easy v14 exposes an unauthenticated ``GET {base_url}/api/release`` that
+    returns the running release as a bare JSON string (confirmed against
+    v14's src/lib/Server.js: it's registered on the router before the
+    password-check middleware). wg-easy v15's rewrite has no endpoint at
+    that path at all. So: a 200 with a non-empty string body means v14;
+    any other response from a server that *did* respond (404, etc.) means
+    it's not v14 - treat it as v15. A connection failure (bad URL, DNS,
+    refused, timeout) is raised so the caller can show a URL/reachability
+    error before ever asking for credentials.
     """
-    # Imported locally to avoid a circular import between api.py and const.py callers.
+    # Imported locally to avoid a circular import with const.py's importers.
     from .const import API_VERSION_V14, API_VERSION_V15
 
-    candidates: list[tuple[str, Any]] = []
-    if requested_version == API_VERSION_V14:
-        candidates = [(API_VERSION_V14, password)]
-    elif requested_version == API_VERSION_V15:
-        candidates = [(API_VERSION_V15, token)]
-    else:
-        if password:
-            candidates.append((API_VERSION_V14, password))
-        if token:
-            candidates.append((API_VERSION_V15, token))
+    base_url = url.rstrip("/")
+    probe_url = f"{base_url}/api/release"
 
-    if not candidates:
-        raise WGEasyApiError(
-            "Provide an API token (v15), a password (v14), or both for auto-detection."
-        )
-
-    last_error: WGEasyApiError | None = None
-    for version, credential in candidates:
-        client: WGEasyV14Client | WGEasyV15Client
-        if version == API_VERSION_V14:
-            client = WGEasyV14Client(session, url, credential)
-        else:
-            client = WGEasyV15Client(session, url, credential)
-
-        try:
-            await client.async_fetch_raw()
-        except WGEasyApiError as err:
-            _LOGGER.debug("WG Easy %s probe failed: %s", version, err)
-            last_error = err
-            continue
-        else:
-            return version, client
-
-    assert last_error is not None
-    raise last_error
+    try:
+        async with session.get(probe_url) as response:
+            if response.status == 200:
+                try:
+                    body = await response.json(content_type=None)
+                except ValueError:
+                    body = None
+                if isinstance(body, str) and body.strip():
+                    return API_VERSION_V14
+            return API_VERSION_V15
+    except ClientError as err:
+        raise WGEasyApiError(f"Could not reach {base_url}: {err}") from err

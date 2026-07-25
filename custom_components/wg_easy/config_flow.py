@@ -9,9 +9,15 @@ from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_URL
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import WGEasyApiError, async_detect_api_version
+from .api import (
+    WGEasyApiError,
+    WGEasyV14Client,
+    WGEasyV15Client,
+    async_probe_wg_easy_version,
+)
 from .const import (
     API_VERSION_AUTO,
+    API_VERSION_V14,
     API_VERSIONS,
     CONF_API_VERSION,
     CONF_RESOLVED_API_VERSION,
@@ -26,56 +32,74 @@ _LOGGER = logging.getLogger(__name__)
 class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 2
 
-    async def _async_validate(self, user_input: dict) -> tuple[dict | None, dict]:
-        """Try to connect with the given input, resolving auto/v14/v15.
+    def __init__(self) -> None:
+        self._url: str | None = None
+        self._requested_version: str = API_VERSION_AUTO
+        self._effective_version: str | None = None
 
-        Returns a (data_to_store, errors) tuple. data_to_store is None if
-        validation failed, in which case errors is populated instead.
-        """
-        url = user_input[CONF_URL]
-        token = user_input.get(CONF_TOKEN) or None
-        password = user_input.get(CONF_PASSWORD) or None
-        requested_version = user_input.get(CONF_API_VERSION, API_VERSION_AUTO)
-
+    async def _async_probe(self, url: str) -> tuple[str | None, dict[str, str]]:
+        """Unauthenticated reachability + version probe (no credentials yet)."""
         session = async_get_clientsession(self.hass)
-
         try:
-            resolved_version, _client = await async_detect_api_version(
-                session,
-                url,
-                token=token,
-                password=password,
-                requested_version=requested_version,
-            )
+            detected = await async_probe_wg_easy_version(session, url)
         except WGEasyApiError as err:
-            _LOGGER.debug("WG Easy connection validation failed: %s", err)
+            _LOGGER.debug("WG Easy probe failed for %s: %s", url, err)
             return None, {"base": "cannot_connect"}
+        return detected, {}
 
-        data = {
-            CONF_URL: url,
-            CONF_API_VERSION: requested_version,
-            CONF_RESOLVED_API_VERSION: resolved_version,
+    async def _async_check_credentials(
+        self, token: str | None, password: str | None
+    ) -> dict[str, str]:
+        """Verify the single relevant credential actually authenticates."""
+        session = async_get_clientsession(self.hass)
+        client = (
+            WGEasyV14Client(session, self._url, password)
+            if self._effective_version == API_VERSION_V14
+            else WGEasyV15Client(session, self._url, token)
+        )
+        try:
+            await client.async_fetch_raw()
+        except WGEasyApiError as err:
+            _LOGGER.debug("WG Easy credential check failed: %s", err)
+            return {"base": "cannot_connect"}
+        return {}
+
+    def _build_entry_data(self, token: str | None, password: str | None) -> dict:
+        return {
+            CONF_URL: self._url,
+            CONF_API_VERSION: self._requested_version,
+            CONF_RESOLVED_API_VERSION: self._effective_version,
+            # Always set both keys explicitly (clearing the unused one) so a
+            # reconfigure that switches version doesn't leave a stale
+            # leftover credential behind in entry.data.
+            CONF_TOKEN: token,
+            CONF_PASSWORD: password,
         }
-        if token:
-            data[CONF_TOKEN] = token
-        if password:
-            data[CONF_PASSWORD] = password
-        return data, {}
+
+    # --- Step 1: address + version -----------------------------------
 
     async def async_step_user(self, user_input=None):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            await self.async_set_unique_id(user_input[CONF_URL])
+            url = user_input[CONF_URL]
+            requested_version = user_input.get(CONF_API_VERSION, API_VERSION_AUTO)
+
+            await self.async_set_unique_id(url)
             self._abort_if_unique_id_configured()
 
-            data, errors = await self._async_validate(user_input)
-            if data is not None:
-                return self.async_create_entry(title="WG Easy", data=data)
+            detected, errors = await self._async_probe(url)
+            if not errors:
+                self._url = url
+                self._requested_version = requested_version
+                self._effective_version = (
+                    detected if requested_version == API_VERSION_AUTO else requested_version
+                )
+                return await self.async_step_credentials()
 
         return self.async_show_form(
             step_id="user",
-            data_schema=self._build_schema(),
+            data_schema=self._build_address_schema(),
             errors=errors,
         )
 
@@ -84,24 +108,75 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            await self.async_set_unique_id(user_input[CONF_URL])
+            url = user_input[CONF_URL]
+            requested_version = user_input.get(CONF_API_VERSION, API_VERSION_AUTO)
+
+            await self.async_set_unique_id(url)
             self._abort_if_unique_id_mismatch(reason="wrong_account")
 
-            data, errors = await self._async_validate(user_input)
-            if data is not None:
-                return self.async_update_reload_and_abort(
-                    entry,
-                    unique_id=user_input[CONF_URL],
-                    data_updates=data,
+            detected, errors = await self._async_probe(url)
+            if not errors:
+                self._url = url
+                self._requested_version = requested_version
+                self._effective_version = (
+                    detected if requested_version == API_VERSION_AUTO else requested_version
                 )
+                return await self.async_step_reconfigure_credentials()
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=self._build_schema(entry.data),
+            data_schema=self._build_address_schema(entry.data),
             errors=errors,
         )
 
-    def _build_schema(self, data=None):
+    # --- Step 2: only the one relevant credential ----------------------
+
+    async def async_step_credentials(self, user_input=None):
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            token = user_input.get(CONF_TOKEN) or None
+            password = user_input.get(CONF_PASSWORD) or None
+
+            errors = await self._async_check_credentials(token, password)
+            if not errors:
+                return self.async_create_entry(
+                    title="WG Easy", data=self._build_entry_data(token, password)
+                )
+
+        return self.async_show_form(
+            step_id="credentials",
+            data_schema=self._build_credentials_schema(),
+            errors=errors,
+            description_placeholders={"api_version": self._effective_version or "?"},
+        )
+
+    async def async_step_reconfigure_credentials(self, user_input=None):
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            token = user_input.get(CONF_TOKEN) or None
+            password = user_input.get(CONF_PASSWORD) or None
+
+            errors = await self._async_check_credentials(token, password)
+            if not errors:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    unique_id=self._url,
+                    data_updates=self._build_entry_data(token, password),
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure_credentials",
+            data_schema=self._build_credentials_schema(entry.data),
+            errors=errors,
+            description_placeholders={"api_version": self._effective_version or "?"},
+        )
+
+    # --- Schemas ---------------------------------------------------------
+
+    def _build_address_schema(self, data=None):
         data = data or {}
         return vol.Schema(
             {
@@ -110,9 +185,17 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_API_VERSION,
                     default=data.get(CONF_API_VERSION, API_VERSION_AUTO),
                 ): vol.In(API_VERSIONS),
-                vol.Optional(CONF_TOKEN, default=data.get(CONF_TOKEN, "")): str,
-                vol.Optional(CONF_PASSWORD, default=data.get(CONF_PASSWORD, "")): str,
             }
+        )
+
+    def _build_credentials_schema(self, data=None):
+        data = data or {}
+        if self._effective_version == API_VERSION_V14:
+            return vol.Schema(
+                {vol.Required(CONF_PASSWORD, default=data.get(CONF_PASSWORD, "")): str}
+            )
+        return vol.Schema(
+            {vol.Required(CONF_TOKEN, default=data.get(CONF_TOKEN, "")): str}
         )
 
     @staticmethod

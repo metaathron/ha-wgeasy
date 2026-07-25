@@ -4,34 +4,47 @@
     "step": {
       "user": {
         "title": "WG Easy",
-        "description": "Set up the WG Easy integration. Choose \"auto\" to let the integration detect whether your wg-easy server speaks the v14 (password) or v15 (API token) API, or pick one explicitly and provide only the matching credential.",
+        "description": "Step 1 of 2: enter the server address and API version. The URL/version will be checked (without any credentials yet) before you're asked for a password or token.",
         "data": {
           "url": "API URL",
-          "api_version": "wg-easy API version (auto, v14, v15)",
+          "api_version": "wg-easy API version (auto, v14, v15)"
+        }
+      },
+      "credentials": {
+        "title": "WG Easy – credentials",
+        "description": "Step 2 of 2: detected/selected API version: {api_version}.",
+        "data": {
           "token": "API token (v15)",
           "password": "Password (v14)"
         },
         "data_description": {
-          "token": "v15 only. The Bearer Password set under Admin Panel \u2192 General \u2192 Metrics in the wg-easy web UI (used to protect the metrics endpoint). Leave empty if your server is v14.",
-          "password": "v14 only. The same password you use to log in to the wg-easy web UI (set via the PASSWORD/PASSWORD_HASH environment variable on the wg-easy container). Leave empty if your server is v15."
+          "token": "The Bearer Password set under Admin Panel → General → Metrics in the wg-easy web UI (used to protect the metrics endpoint).",
+          "password": "The same password you use to log in to the wg-easy web UI (set via the PASSWORD_HASH environment variable on the wg-easy container)."
         }
       },
       "reconfigure": {
         "title": "Reconfigure WG Easy",
+        "description": "Step 1 of 2: update the server address and/or API version.",
         "data": {
           "url": "API URL",
-          "api_version": "wg-easy API version (auto, v14, v15)",
+          "api_version": "wg-easy API version (auto, v14, v15)"
+        }
+      },
+      "reconfigure_credentials": {
+        "title": "Reconfigure WG Easy – credentials",
+        "description": "Step 2 of 2: detected/selected API version: {api_version}.",
+        "data": {
           "token": "API token (v15)",
           "password": "Password (v14)"
         },
         "data_description": {
-          "token": "v15 only. The Bearer Password set under Admin Panel \u2192 General \u2192 Metrics in the wg-easy web UI (used to protect the metrics endpoint). Leave empty if your server is v14.",
-          "password": "v14 only. The same password you use to log in to the wg-easy web UI (set via the PASSWORD/PASSWORD_HASH environment variable on the wg-easy container). Leave empty if your server is v15."
+          "token": "The Bearer Password set under Admin Panel → General → Metrics in the wg-easy web UI (used to protect the metrics endpoint).",
+          "password": "The same password you use to log in to the wg-easy web UI (set via the PASSWORD_HASH environment variable on the wg-easy container)."
         }
       }
     },
     "error": {
-      "cannot_connect": "Could not connect to wg-easy with the given URL/credentials for the selected API version."
+      "cannot_connect": "Could not connect. If the address is correct but this keeps failing, try again and pick the API version manually instead of auto."
     },
     "abort": {
       "already_configured": "This integration is already configured.",
