@@ -69,7 +69,6 @@ class WGBasePeerEntity(CoordinatorEntity):
         self.entity_id = f"{platform}.{ENTITY_ID_PREFIX}_{self.client_name_slug}_{suffix}"
 
     def async_write_ha_state(self) -> None:
-        """Skip redundant state writes to Home Assistant when nothing changed."""
         current_state = (getattr(self, "native_value", None), self.available)
         if self._last_pushed_state is not None and current_state == self._last_pushed_state:
             return
@@ -172,6 +171,17 @@ class WGPeerTextSensor(WGBasePeerEntity, SensorEntity):
         self._attr_unique_id = f"wg_{self.client_key}_{kind}"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._set_entity_id("sensor", slugify(kind))
+        # wg-easy v14 never provides "endpoint" or "ipv6Address" (v14 has no
+        # IPv6 client concept, and doesn't surface the live endpoint from
+        # `wg show` via its API at all - confirmed against v14's source).
+        # Rather than hard-coding that per API version, disable the entity
+        # by default whenever the value is missing at creation time - this
+        # naturally keeps ipv4Address enabled (always present on both
+        # versions for a real client) while endpoint/ipv6Address start out
+        # disabled on v14 servers, without sensor.py needing to know which
+        # API version produced the data. Users can still enable them by
+        # hand if a value shows up later.
+        self._attr_entity_registry_enabled_default = client.get(kind) is not None
 
     @property
     def native_value(self):
