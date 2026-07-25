@@ -87,11 +87,15 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _normalize_payload(self, payload: Any) -> dict[str, Any]:
         """Normalize a v14 or v15 payload into a common shape.
 
-        v15 returns a dict with a "clients" list, each keyed by "publicKey".
-        v14 returns either a dict or a bare list, each keyed by "id". Both
-        are normalized here to use "publicKey" as the canonical identifier,
-        so sensor.py / binary_sensor.py / entity_manager.py don't need to
-        know which API version produced the data.
+        v15 returns a dict with a "clients" list, each keyed by "publicKey",
+        with dedicated "ipv4Address"/"ipv6Address" fields (see wg-easy's
+        clients_table schema). v14 returns a bare list, each keyed by "id",
+        with a single "address" field (IPv4 only - v14 has no IPv6 client
+        address concept at all) and no "ipv4Address"/"ipv6Address" keys.
+        Both are normalized here to use "publicKey" as the canonical
+        identifier and "ipv4Address"/"ipv6Address" as the canonical address
+        fields, so sensor.py / binary_sensor.py / entity_manager.py don't
+        need to know which API version produced the data.
         """
         if isinstance(payload, list):
             clients = payload
@@ -130,11 +134,16 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             next_previous_counters[public_key] = (now, transfer_rx, transfer_tx)
 
-            # v14 doesn't always expose a ready-made ipv4Address field; fall
-            # back to the first entry in allowedIps if present.
+            # v15 exposes dedicated ipv4Address/ipv6Address fields. v14 only
+            # exposes a single "address" field (its client model is IPv4-only
+            # and has no "ipv4Address"/"ipv6Address" keys at all). Fall back
+            # to allowedIps as a last resort for any future/other shape.
             allowed_ips = client.get("allowedIps") or []
             inferred_ipv4 = (
                 allowed_ips[0] if isinstance(allowed_ips, list) and allowed_ips else None
+            )
+            ipv4_address = (
+                client.get("ipv4Address") or client.get("address") or inferred_ipv4
             )
 
             normalized_clients.append(
@@ -147,7 +156,7 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "transferRxRate": round(transfer_rx_rate, 2),
                     "transferTxRate": round(transfer_tx_rate, 2),
                     "endpoint": client.get("endpoint") or None,
-                    "ipv4Address": client.get("ipv4Address") or inferred_ipv4,
+                    "ipv4Address": ipv4_address,
                     "ipv6Address": client.get("ipv6Address") or None,
                     "enabled": bool(client.get("enabled", False)),
                     "latestHandshakeAt": client.get("latestHandshakeAt") or None,
