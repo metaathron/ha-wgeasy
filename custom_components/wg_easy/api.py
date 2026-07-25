@@ -33,10 +33,17 @@ class WGEasyV15Client:
     so entering just the base address is enough.
     """
 
-    def __init__(self, session: ClientSession, url: str, token: str | None) -> None:
+    def __init__(
+        self,
+        session: ClientSession,
+        url: str,
+        token: str | None,
+        verify_ssl: bool = True,
+    ) -> None:
         self._session = session
         self._url = self._normalize_url(url)
         self._token = token
+        self._verify_ssl = verify_ssl
 
     @staticmethod
     def _normalize_url(url: str) -> str:
@@ -54,7 +61,9 @@ class WGEasyV15Client:
             "Accept": "application/json",
         }
         try:
-            async with self._session.get(self._url, headers=headers) as response:
+            async with self._session.get(
+                self._url, headers=headers, ssl=self._verify_ssl
+            ) as response:
                 if response.status == 401:
                     raise WGEasyAuthError("Unauthorized - check API token")
                 if response.status >= 400:
@@ -68,10 +77,17 @@ class WGEasyV15Client:
 class WGEasyV14Client:
     """Talks to a wg-easy v14 style API: password login -> session cookie -> REST endpoint."""
 
-    def __init__(self, session: ClientSession, url: str, password: str | None) -> None:
+    def __init__(
+        self,
+        session: ClientSession,
+        url: str,
+        password: str | None,
+        verify_ssl: bool = True,
+    ) -> None:
         self._session = session
         self._base_url = url.rstrip("/")
         self._password = password
+        self._verify_ssl = verify_ssl
         self._session_cookie: str | None = None
 
     async def _async_login(self) -> None:
@@ -81,7 +97,7 @@ class WGEasyV14Client:
         session_url = f"{self._base_url}/api/session"
         try:
             async with self._session.post(
-                session_url, json={"password": self._password}
+                session_url, json={"password": self._password}, ssl=self._verify_ssl
             ) as response:
                 if response.status == 401:
                     raise WGEasyAuthError("Unauthorized - check password")
@@ -113,7 +129,10 @@ class WGEasyV14Client:
 
         try:
             async with self._session.get(
-                data_url, headers={"Accept": "application/json"}, cookies=cookies
+                data_url,
+                headers={"Accept": "application/json"},
+                cookies=cookies,
+                ssl=self._verify_ssl,
             ) as response:
                 if response.status == 401:
                     # Session likely expired; drop it so the next poll logs in again.
@@ -127,7 +146,9 @@ class WGEasyV14Client:
             raise WGEasyApiError(f"Request failed: {err}") from err
 
 
-async def async_probe_wg_easy_version(session: ClientSession, url: str) -> str:
+async def async_probe_wg_easy_version(
+    session: ClientSession, url: str, verify_ssl: bool = True
+) -> str:
     """Unauthenticated probe to tell wg-easy v14 apart from v15, before any credentials.
 
     wg-easy v14 exposes an unauthenticated ``GET {base_url}/api/release`` that
@@ -137,8 +158,9 @@ async def async_probe_wg_easy_version(session: ClientSession, url: str) -> str:
     that path at all. So: a 200 with a non-empty string body means v14;
     any other response from a server that *did* respond (404, etc.) means
     it's not v14 - treat it as v15. A connection failure (bad URL, DNS,
-    refused, timeout) is raised so the caller can show a URL/reachability
-    error before ever asking for credentials.
+    refused, timeout, or an untrusted TLS certificate when verify_ssl is
+    on) is raised so the caller can show a URL/reachability error before
+    ever asking for credentials.
     """
     # Imported locally to avoid a circular import with const.py's importers.
     from .const import API_VERSION_V14, API_VERSION_V15
@@ -147,7 +169,7 @@ async def async_probe_wg_easy_version(session: ClientSession, url: str) -> str:
     probe_url = f"{base_url}/api/release"
 
     try:
-        async with session.get(probe_url) as response:
+        async with session.get(probe_url, ssl=verify_ssl) as response:
             if response.status == 200:
                 try:
                     body = await response.json(content_type=None)

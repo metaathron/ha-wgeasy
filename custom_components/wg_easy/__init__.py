@@ -14,8 +14,10 @@ from .const import (
     CONF_ONLINE_TIMEOUT_MINUTES,
     CONF_ONLINE_TIMEOUT_SECONDS,
     CONF_RESOLVED_API_VERSION,
+    CONF_VERIFY_SSL,
     DEFAULT_ONLINE_TIMEOUT_MINUTES,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_VERIFY_SSL,
     DOMAIN,
     PLATFORMS,
 )
@@ -80,9 +82,30 @@ def _migrate_api_version_data(hass: HomeAssistant, entry: WGEasyConfigEntry) -> 
     )
 
 
+def _migrate_verify_ssl_data(hass: HomeAssistant, entry: WGEasyConfigEntry) -> None:
+    """One-time migration for entries created before the SSL-verification
+
+    toggle existed. Defaults to True (verify), matching the behaviour those
+    entries already had (Home Assistant's shared aiohttp session verifies
+    certificates by default), so nothing changes for existing users.
+    """
+    if CONF_VERIFY_SSL in entry.data:
+        return
+
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_VERIFY_SSL: DEFAULT_VERIFY_SSL}
+    )
+    _LOGGER.info(
+        "WG Easy (%s): migrated existing entry to explicit verify_ssl=%s",
+        entry.title,
+        DEFAULT_VERIFY_SSL,
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: WGEasyConfigEntry) -> bool:
     _migrate_online_timeout_option(hass, entry)
     _migrate_api_version_data(hass, entry)
+    _migrate_verify_ssl_data(hass, entry)
 
     coordinator = WGEasyCoordinator(
         hass,
@@ -91,6 +114,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: WGEasyConfigEntry) -> bo
         api_version=entry.data[CONF_RESOLVED_API_VERSION],
         token=entry.data.get(CONF_TOKEN),
         password=entry.data.get(CONF_PASSWORD),
+        verify_ssl=entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
         poll_interval=entry.options.get("poll_interval", DEFAULT_POLL_INTERVAL),
     )
 

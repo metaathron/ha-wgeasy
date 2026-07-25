@@ -26,6 +26,7 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         api_version: str,
         token: str | None = None,
         password: str | None = None,
+        verify_ssl: bool = True,
         poll_interval: int = DEFAULT_POLL_INTERVAL,
     ) -> None:
         super().__init__(
@@ -41,9 +42,9 @@ class WGEasyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._client: WGEasyV14Client | WGEasyV15Client
         if api_version == API_VERSION_V14:
-            self._client = WGEasyV14Client(self.session, url, password)
+            self._client = WGEasyV14Client(self.session, url, password, verify_ssl)
         else:
-            self._client = WGEasyV15Client(self.session, url, token)
+            self._client = WGEasyV15Client(self.session, url, token, verify_ssl)
 
         self._known_client_keys: set[str] = set()
         self.peer_map: dict[str, dict[str, Any]] = {}

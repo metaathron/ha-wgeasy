@@ -7,7 +7,11 @@
         "description": "Step 1 of 2: enter the server address (e.g. https://host or https://host/subpath - just the base address, no need to add any API path) and API version. The URL/version will be checked (without any credentials yet) before you're asked for a password or token.",
         "data": {
           "url": "Server address (e.g. https://host or https://host/subpath)",
-          "api_version": "wg-easy API version (auto, v14, v15)"
+          "api_version": "wg-easy API version (auto, v14, v15)",
+          "verify_ssl": "Verify SSL certificate"
+        },
+        "data_description": {
+          "verify_ssl": "Leave on unless your wg-easy server uses a self-signed certificate you trust. Turning this off skips certificate validation - only use it on a trusted network."
         }
       },
       "credentials": {
@@ -27,7 +31,11 @@
         "description": "Step 1 of 2: update the server address and/or API version.",
         "data": {
           "url": "Server address (e.g. https://host or https://host/subpath)",
-          "api_version": "wg-easy API version (auto, v14, v15)"
+          "api_version": "wg-easy API version (auto, v14, v15)",
+          "verify_ssl": "Verify SSL certificate"
+        },
+        "data_description": {
+          "verify_ssl": "Leave on unless your wg-easy server uses a self-signed certificate you trust. Turning this off skips certificate validation - only use it on a trusted network."
         }
       },
       "reconfigure_credentials": {
@@ -44,7 +52,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Could not connect. If the address is correct but this keeps failing, try again and pick the API version manually instead of auto."
+      "cannot_connect": "Could not connect. If the address is correct but this keeps failing, try again and pick the API version manually instead of auto, or check the SSL verification setting if your server uses a self-signed certificate."
     },
     "abort": {
       "already_configured": "This integration is already configured.",

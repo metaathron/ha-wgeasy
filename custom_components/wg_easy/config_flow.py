@@ -21,8 +21,10 @@ from .const import (
     API_VERSIONS,
     CONF_API_VERSION,
     CONF_RESOLVED_API_VERSION,
+    CONF_VERIFY_SSL,
     DEFAULT_ONLINE_TIMEOUT_SECONDS,
     DEFAULT_POLL_INTERVAL,
+    DEFAULT_VERIFY_SSL,
     DOMAIN,
 )
 
@@ -36,12 +38,13 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._url: str | None = None
         self._requested_version: str = API_VERSION_AUTO
         self._effective_version: str | None = None
+        self._verify_ssl: bool = DEFAULT_VERIFY_SSL
 
-    async def _async_probe(self, url: str) -> tuple[str | None, dict[str, str]]:
+    async def _async_probe(self, url: str, verify_ssl: bool) -> tuple[str | None, dict[str, str]]:
         """Unauthenticated reachability + version probe (no credentials yet)."""
         session = async_get_clientsession(self.hass)
         try:
-            detected = await async_probe_wg_easy_version(session, url)
+            detected = await async_probe_wg_easy_version(session, url, verify_ssl)
         except WGEasyApiError as err:
             _LOGGER.debug("WG Easy probe failed for %s: %s", url, err)
             return None, {"base": "cannot_connect"}
@@ -53,9 +56,9 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Verify the single relevant credential actually authenticates."""
         session = async_get_clientsession(self.hass)
         client = (
-            WGEasyV14Client(session, self._url, password)
+            WGEasyV14Client(session, self._url, password, self._verify_ssl)
             if self._effective_version == API_VERSION_V14
-            else WGEasyV15Client(session, self._url, token)
+            else WGEasyV15Client(session, self._url, token, self._verify_ssl)
         )
         try:
             await client.async_fetch_raw()
@@ -69,6 +72,7 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_URL: self._url,
             CONF_API_VERSION: self._requested_version,
             CONF_RESOLVED_API_VERSION: self._effective_version,
+            CONF_VERIFY_SSL: self._verify_ssl,
             # Always set both keys explicitly (clearing the unused one) so a
             # reconfigure that switches version doesn't leave a stale
             # leftover credential behind in entry.data.
@@ -76,7 +80,7 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_PASSWORD: password,
         }
 
-    # --- Step 1: address + version -----------------------------------
+    # --- Step 1: address + version + SSL verification --------------------
 
     async def async_step_user(self, user_input=None):
         errors: dict[str, str] = {}
@@ -84,14 +88,16 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             url = user_input[CONF_URL]
             requested_version = user_input.get(CONF_API_VERSION, API_VERSION_AUTO)
+            verify_ssl = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
 
             await self.async_set_unique_id(url)
             self._abort_if_unique_id_configured()
 
-            detected, errors = await self._async_probe(url)
+            detected, errors = await self._async_probe(url, verify_ssl)
             if not errors:
                 self._url = url
                 self._requested_version = requested_version
+                self._verify_ssl = verify_ssl
                 self._effective_version = (
                     detected if requested_version == API_VERSION_AUTO else requested_version
                 )
@@ -110,14 +116,16 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             url = user_input[CONF_URL]
             requested_version = user_input.get(CONF_API_VERSION, API_VERSION_AUTO)
+            verify_ssl = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
 
             await self.async_set_unique_id(url)
             self._abort_if_unique_id_mismatch(reason="wrong_account")
 
-            detected, errors = await self._async_probe(url)
+            detected, errors = await self._async_probe(url, verify_ssl)
             if not errors:
                 self._url = url
                 self._requested_version = requested_version
+                self._verify_ssl = verify_ssl
                 self._effective_version = (
                     detected if requested_version == API_VERSION_AUTO else requested_version
                 )
@@ -185,6 +193,10 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_API_VERSION,
                     default=data.get(CONF_API_VERSION, API_VERSION_AUTO),
                 ): vol.In(API_VERSIONS),
+                vol.Required(
+                    CONF_VERIFY_SSL,
+                    default=data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+                ): bool,
             }
         )
 
