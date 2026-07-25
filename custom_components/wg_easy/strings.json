@@ -4,9 +4,9 @@
     "step": {
       "user": {
         "title": "WG Easy",
-        "description": "Step 1 of 2: enter the server address and API version. The URL/version will be checked (without any credentials yet) before you're asked for a password or token.",
+        "description": "Step 1 of 2: enter the server address (e.g. https://host or https://host/subpath - just the base address, no need to add any API path) and API version. The URL/version will be checked (without any credentials yet) before you're asked for a password or token.",
         "data": {
-          "url": "API URL",
+          "url": "Server address (e.g. https://host or https://host/subpath)",
           "api_version": "wg-easy API version (auto, v14, v15)"
         }
       },
@@ -18,7 +18,7 @@
           "password": "Password (v14)"
         },
         "data_description": {
-          "token": "The Bearer Password set under Admin Panel → General → Metrics in the wg-easy web UI (used to protect the metrics endpoint).",
+          "token": "The Bearer Password set under Admin Panel → General → Metrics in the wg-easy web UI. This integration automatically appends /metrics/json to your server address to reach it.",
           "password": "The same password you use to log in to the wg-easy web UI (set via the PASSWORD_HASH environment variable on the wg-easy container)."
         }
       },
@@ -26,7 +26,7 @@
         "title": "Reconfigure WG Easy",
         "description": "Step 1 of 2: update the server address and/or API version.",
         "data": {
-          "url": "API URL",
+          "url": "Server address (e.g. https://host or https://host/subpath)",
           "api_version": "wg-easy API version (auto, v14, v15)"
         }
       },
@@ -38,7 +38,7 @@
           "password": "Password (v14)"
         },
         "data_description": {
-          "token": "The Bearer Password set under Admin Panel → General → Metrics in the wg-easy web UI (used to protect the metrics endpoint).",
+          "token": "The Bearer Password set under Admin Panel → General → Metrics in the wg-easy web UI. This integration automatically appends /metrics/json to your server address to reach it.",
           "password": "The same password you use to log in to the wg-easy web UI (set via the PASSWORD_HASH environment variable on the wg-easy container)."
         }
       }

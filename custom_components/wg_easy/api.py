@@ -17,12 +17,33 @@ class WGEasyAuthError(WGEasyApiError):
 
 
 class WGEasyV15Client:
-    """Talks to a wg-easy v15+ style API: a single endpoint secured with a bearer token."""
+    """Talks to wg-easy v15's Bearer-token-secured metrics endpoint.
+
+    v15 has no general Bearer-token JSON API - the only endpoint secured by
+    a Bearer token is the metrics feature (Admin Panel -> General ->
+    Metrics), and its JSON variant at "{base_url}/metrics/json" returns
+    exactly the {clients: [...], wireguard_configured_peers, ...} shape
+    this integration expects (confirmed against wg-easy's own
+    src/server/routes/metrics/json.get.ts). The general "/api/..." REST
+    API is Basic Auth only and unrelated to this token.
+
+    The configured URL is treated as the server's base address (optionally
+    including a reverse-proxy subpath, e.g. "https://host/wireguard") and
+    "/metrics/json" is appended automatically unless it's already there,
+    so entering just the base address is enough.
+    """
 
     def __init__(self, session: ClientSession, url: str, token: str | None) -> None:
         self._session = session
-        self._url = url
+        self._url = self._normalize_url(url)
         self._token = token
+
+    @staticmethod
+    def _normalize_url(url: str) -> str:
+        base = (url or "").rstrip("/")
+        if base.endswith("/metrics/json"):
+            return base
+        return f"{base}/metrics/json"
 
     async def async_fetch_raw(self) -> bytes:
         if not self._token:
@@ -122,7 +143,7 @@ async def async_probe_wg_easy_version(session: ClientSession, url: str) -> str:
     # Imported locally to avoid a circular import with const.py's importers.
     from .const import API_VERSION_V14, API_VERSION_V15
 
-    base_url = url.rstrip("/")
+    base_url = (url or "").rstrip("/")
     probe_url = f"{base_url}/api/release"
 
     try:
