@@ -26,6 +26,21 @@ class WGEasyNotDetectedError(WGEasyApiError):
     """
 
 
+def _strip_known_endpoint_suffix(url: str) -> str:
+    """Return the server's base address, stripping a known endpoint path if
+    the user pasted a full endpoint URL instead of just the base (e.g.
+    "https://host/metrics/json" or "https://host/api/release"). Shared by
+    the version probe and the v15 client's own URL building, so entering
+    either the base address or a full endpoint URL works consistently
+    everywhere instead of only in one place.
+    """
+    base = (url or "").rstrip("/")
+    for suffix in ("/metrics/json", "/api/release", "/api"):
+        if base.endswith(suffix):
+            return base[: -len(suffix)].rstrip("/")
+    return base
+
+
 class WGEasyV15Client:
     """Talks to wg-easy v15's Bearer-token-secured metrics endpoint.
 
@@ -57,10 +72,7 @@ class WGEasyV15Client:
 
     @staticmethod
     def _normalize_url(url: str) -> str:
-        base = (url or "").rstrip("/")
-        if base.endswith("/metrics/json"):
-            return base
-        return f"{base}/metrics/json"
+        return f"{_strip_known_endpoint_suffix(url)}/metrics/json"
 
     async def async_fetch_raw(self) -> bytes:
         if not self._token:
@@ -95,7 +107,7 @@ class WGEasyV14Client:
         verify_ssl: bool = True,
     ) -> None:
         self._session = session
-        self._base_url = url.rstrip("/")
+        self._base_url = _strip_known_endpoint_suffix(url)
         self._password = password
         self._verify_ssl = verify_ssl
         self._session_cookie: str | None = None
@@ -226,13 +238,21 @@ async def async_probe_wg_easy_version(
     # Imported locally to avoid a circular import with const.py's importers.
     from .const import API_VERSION_V14, API_VERSION_V15
 
-    base_url = (url or "").rstrip("/")
+    base_url = _strip_known_endpoint_suffix(url)
+    _LOGGER.debug("wg-easy probe: input url=%r -> base_url=%r", url, base_url)
 
     async with aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar()) as probe_session:
         try:
             async with probe_session.get(
                 f"{base_url}/api/release", ssl=verify_ssl
             ) as response:
+                _LOGGER.debug(
+                    "wg-easy probe: GET %s -> final_url=%s status=%s content-type=%r",
+                    f"{base_url}/api/release",
+                    response.url,
+                    response.status,
+                    response.headers.get("Content-Type"),
+                )
                 if response.status == 200:
                     try:
                         body = await response.json(content_type=None)
