@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import aiohttp
 from aiohttp import ClientError, ClientSession
 
 _LOGGER = logging.getLogger(__name__)
@@ -14,6 +15,15 @@ class WGEasyApiError(Exception):
 
 class WGEasyAuthError(WGEasyApiError):
     """Raised when authentication with the WG Easy API fails."""
+
+
+class WGEasyNotDetectedError(WGEasyApiError):
+    """Raised when a server responds, but doesn't look like wg-easy at all.
+
+    Distinct from a plain WGEasyApiError (network/connectivity failure) so
+    the config flow can show a more specific, human message: the address
+    was reachable, it just isn't a wg-easy install.
+    """
 
 
 class WGEasyV15Client:
@@ -146,37 +156,117 @@ class WGEasyV14Client:
             raise WGEasyApiError(f"Request failed: {err}") from err
 
 
+async def _looks_like_json(response) -> bool:
+    """True if a response is actually JSON, by header or by successfully parsing it.
+
+    Used to avoid being fooled by servers that return HTTP 200/401/etc. for
+    every path (e.g. an unrelated single-page app with catch-all client-side
+    routing serving its index.html for any URL) instead of a real API
+    response.
+    """
+    content_type = response.headers.get("Content-Type", "")
+    if "json" in content_type.lower():
+        return True
+    try:
+        await response.json(content_type=None)
+    except ValueError:
+        return False
+    return True
+
+
 async def async_probe_wg_easy_version(
     session: ClientSession, url: str, verify_ssl: bool = True
 ) -> str:
     """Unauthenticated probe to tell wg-easy v14 apart from v15, before any credentials.
 
-    wg-easy v14 exposes an unauthenticated ``GET {base_url}/api/release`` that
-    returns the running release as a bare JSON string (confirmed against
-    v14's src/lib/Server.js: it's registered on the router before the
-    password-check middleware). wg-easy v15's rewrite has no endpoint at
-    that path at all. So: a 200 with a non-empty string body means v14;
-    any other response from a server that *did* respond (404, etc.) means
-    it's not v14 - treat it as v15. A connection failure (bad URL, DNS,
-    refused, timeout, or an untrusted TLS certificate when verify_ssl is
-    on) is raised so the caller can show a URL/reachability error before
-    ever asking for credentials.
+    Looks for a version-specific *positive* signature for each, rather than
+    assuming "not v14 => v15" - pointing this at an unrelated web service
+    that happens to respond to every path (a common pattern for single-page
+    apps) would otherwise be misclassified as v15 instead of failing.
+
+    - v14 signature: unauthenticated ``GET {base_url}/api/release`` returns
+      the running release as a bare JSON string (confirmed against v14's
+      src/lib/Server.js - registered before the password-check middleware).
+    - v15 signature: ``GET {base_url}/metrics/json`` is a real route that
+      exists only on v15 (its metrics feature). Even without a token it
+      should answer with 200 (no metrics password configured) or
+      401/403 (password required) and an actual JSON body - never a plain
+      404, and never an HTML page.
+
+    If neither signature matches, a WGEasyNotDetectedError is raised so the
+    caller can tell the user this doesn't look like a wg-easy server,
+    instead of silently guessing. A genuine connection failure (bad URL,
+    DNS, refused, timeout, TLS error) raises the plain WGEasyApiError
+    instead, so the two cases can get distinct, more useful error messages.
+
+    Deliberately does NOT use Home Assistant's shared client session
+    (``session`` is accepted for API-compatibility with callers but
+    unused). wg-easy's web UI sets cookies (theme, i18n_redirected, ...)
+    on every response, and HA's shared session is process-wide - if
+    another wg_easy config entry is already polling this same host with a
+    valid Bearer token, its cookies end up in that shared jar too. Using
+    a throwaway session with an empty cookie jar makes this probe behave
+    like a fresh client every time, regardless of what else is talking to
+    the same host.
+
+    The ``/metrics/json`` request also sends a deliberately-bogus
+    ``Authorization: Bearer`` header (plus ``Accept: application/json``).
+    Even with a clean cookie jar, a request with *no* Authorization header
+    at all can still get routed through wg-easy's browser/session-login
+    logic on some deployments (reverse proxies and the app's own auth
+    middleware may treat "no credentials presented" as "anonymous browser
+    visit -> redirect to /login" rather than "API client -> 401 JSON").
+    Presenting *a* Bearer token - even an invalid one - unambiguously
+    signals "this is an API-style request" to the same auth middleware
+    real token-authenticated requests go through (see
+    ``WGEasyV15Client.async_fetch_raw``, which reliably gets a clean JSON
+    response this way), so the server evaluates and rejects it as bad
+    credentials (401/403 JSON) instead of redirecting.
     """
     # Imported locally to avoid a circular import with const.py's importers.
     from .const import API_VERSION_V14, API_VERSION_V15
 
     base_url = (url or "").rstrip("/")
-    probe_url = f"{base_url}/api/release"
 
-    try:
-        async with session.get(probe_url, ssl=verify_ssl) as response:
-            if response.status == 200:
-                try:
-                    body = await response.json(content_type=None)
-                except ValueError:
-                    body = None
-                if isinstance(body, str) and body.strip():
-                    return API_VERSION_V14
-            return API_VERSION_V15
-    except ClientError as err:
-        raise WGEasyApiError(f"Could not reach {base_url}: {err}") from err
+    async with aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar()) as probe_session:
+        try:
+            async with probe_session.get(
+                f"{base_url}/api/release", ssl=verify_ssl
+            ) as response:
+                if response.status == 200:
+                    try:
+                        body = await response.json(content_type=None)
+                    except ValueError:
+                        body = None
+                    if isinstance(body, str) and body.strip():
+                        return API_VERSION_V14
+
+            async with probe_session.get(
+                f"{base_url}/metrics/json",
+                headers={
+                    "Authorization": "Bearer wg-easy-ha-integration-version-probe",
+                    "Accept": "application/json",
+                },
+                ssl=verify_ssl,
+            ) as response:
+                looks_json = await _looks_like_json(response)
+                _LOGGER.debug(
+                    "wg-easy probe: GET %s -> final_url=%s status=%s "
+                    "content-type=%r looks_like_json=%s",
+                    f"{base_url}/metrics/json",
+                    response.url,
+                    response.status,
+                    response.headers.get("Content-Type"),
+                    looks_json,
+                )
+                if response.status in (200, 401, 403) and looks_json:
+                    return API_VERSION_V15
+        except ClientError as err:
+            raise WGEasyApiError(f"Could not reach {base_url}: {err}") from err
+
+    raise WGEasyNotDetectedError(
+        f"{base_url} does not look like a wg-easy server (neither the v14 "
+        "nor the v15 signature endpoint responded as expected). Check the "
+        "address, or pick the API version manually if you're sure it's "
+        "correct."
+    )

@@ -11,6 +11,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
     WGEasyApiError,
+    WGEasyAuthError,
+    WGEasyNotDetectedError,
     WGEasyV14Client,
     WGEasyV15Client,
     async_probe_wg_easy_version,
@@ -41,10 +43,18 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._verify_ssl: bool = DEFAULT_VERIFY_SSL
 
     async def _async_probe(self, url: str, verify_ssl: bool) -> tuple[str | None, dict[str, str]]:
-        """Unauthenticated reachability + version probe (no credentials yet)."""
+        """Unauthenticated reachability + version probe (no credentials yet).
+
+        Distinguishes "couldn't reach it at all" from "reached it, but it
+        doesn't look like wg-easy" so the form can show a more specific,
+        human error instead of a generic "cannot connect" for both.
+        """
         session = async_get_clientsession(self.hass)
         try:
             detected = await async_probe_wg_easy_version(session, url, verify_ssl)
+        except WGEasyNotDetectedError as err:
+            _LOGGER.debug("WG Easy probe: %s does not look like wg-easy: %s", url, err)
+            return None, {"base": "not_wg_easy"}
         except WGEasyApiError as err:
             _LOGGER.debug("WG Easy probe failed for %s: %s", url, err)
             return None, {"base": "cannot_connect"}
@@ -53,7 +63,13 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def _async_check_credentials(
         self, token: str | None, password: str | None
     ) -> dict[str, str]:
-        """Verify the single relevant credential actually authenticates."""
+        """Verify the single relevant credential actually authenticates.
+
+        Run for both the initial setup and every reconfigure, before the
+        entry is created/updated - so a wrong token/password never gets
+        silently saved. Distinguishes "wrong credentials" from "couldn't
+        reach the server" so the error shown makes sense either way.
+        """
         session = async_get_clientsession(self.hass)
         client = (
             WGEasyV14Client(session, self._url, password, self._verify_ssl)
@@ -62,6 +78,9 @@ class WGEasyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
         try:
             await client.async_fetch_raw()
+        except WGEasyAuthError as err:
+            _LOGGER.debug("WG Easy credential check: rejected: %s", err)
+            return {"base": "invalid_auth"}
         except WGEasyApiError as err:
             _LOGGER.debug("WG Easy credential check failed: %s", err)
             return {"base": "cannot_connect"}
